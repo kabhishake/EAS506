@@ -1,0 +1,426 @@
+---
+title: "Homework 3"
+author: "Abhishek Kumar"
+date: "10/5/2021"
+output: html_document
+---
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results = "hide", include = FALSE}
+
+rm(list = ls())
+
+# install.packages("e1071")
+# install.packages("klaR")
+# install.packages("GGally")
+
+library(leaps)
+library(ISLR)
+library(caret)
+library(MASS)
+library(klaR)
+library(class)
+library(GGally)
+library(corrplot)
+```
+1. We have seen that as the number of features used in a model increase, the training error will necessarily decrease, but the test error may not. We will now explore this in a simulated data set.
+(a) Generate a data set with p = 20 features, n = 1,000 observations, and an associated quantitative response vector generated according to the model: Y = Xβ + ϵ, where β has some elements that are exactly equal to zero. (be sure to use “set.seed”) Hint: you may use “rnorm”.
+<br>
+- Data was generated such that X is normally distributed and beta is uniformly distributed. 6 random elements of beta were set to 0. The error term is also normally distributed and taken as $10^{-4}$ of the order of X.
+
+```{r, results = "hide"}
+
+set.seed(8)
+
+# creating data set X
+X_data <- as.matrix(replicate(20, rnorm(1000)))
+
+# creating beta and changing 6 random elements in beta to 0
+beta <- runif(20)
+beta[beta %in% sample(beta, 6)] <- 0
+
+# creating error term epsilon
+epsilon <- as.matrix(0.0001 * rnorm(1000))
+
+# creating response vector Y
+Y_data <- as.matrix(X_data %*% beta + epsilon)
+
+full_data <- data.frame(Y_data, X_data)
+
+head(full_data)
+
+```
+
+(b) Split your data set into a training set containing 900 observations and a test set containing 100 observations.
+
+```{r, results = "hide"}
+
+set.seed(8)
+
+train_indis <- sample(c(1:length(Y_data[, 1])), size = 900, replace = FALSE)
+
+train_data <- full_data[train_indis, ]
+test_data <- full_data[-train_indis, ]
+
+y_true_train = train_data$Y_data
+y_true_test = test_data$Y_data
+```
+
+(c) Perform subset selection (best, forward or backwards) on the training set, and plot the training set MSE associated with the best model of each size.
+<br> 
+- I am using the best subset selection for doing this analysis. 
+
+```{r, results = "hide"}
+
+# performing best subset selection on the training data
+regfit.full <- regsubsets(Y_data ~ ., data = train_data, nbest = 1, nvmax = 20,
+                          method = "exhaustive")
+
+####################################################################
+# Function for looking at subset selection using test/training data
+####################################################################
+predict.regsubsets = function(object, newdata, id){
+    form = as.formula(object$call[[2]])
+    mat = model.matrix(form, newdata)
+    coefi = coef(object,id=id)
+    xvars=names(coefi)
+    mat[,xvars]%*%coefi
+}
+
+# objects to store error
+train_MSE_full <- matrix(rep(NA, 20))
+test_MSE_full <- matrix(rep(NA, 20))
+
+# calculating and storing the errors
+for (i in 1:20){
+    # make the predictions
+    y_hat_train_full = predict(regfit.full, newdata = train_data, id = i)
+    y_hat_test_full = predict(regfit.full, newdata = test_data, id = i)
+    
+    # compare the prediction with the true
+    train_MSE_full[i] = (1/length(y_true_train)) * sum((y_true_train - y_hat_train_full)^2)
+    test_MSE_full[i] = (1/length(y_true_test)) * sum((y_true_test - y_hat_test_full)^2)
+}
+
+# Plotting the training set MSEs
+# quartz()
+plot(train_MSE_full, col = "blue", type = "b", xlab = "No. of variables", ylab = "MSE")
+
+```
+
+(d) Plot the test set MSE associated with the best model of each size.
+
+```{r, results = "hide"}
+
+# Plotting the test set MSEs
+# quartz()
+plot(test_MSE_full, col = "red", type = "b", xlab = "No. of variables", ylab = "MSE")
+
+```
+
+(e) For which model size does the test set MSE take on its minimum value? Comment on your results. If it takes on its minimum value for a model containing only an intercept or a model containing all the features, then play around with the way that you are generating the data in (a) until you come up with a scenario in which the test set MSE is minimized for an intermediate model size.
+<br>
+- Test set MSE takes its minimum value for 15 features. It should've ideally been 14 features since we set 6 of them to 0.
+
+```{r, results = "hide"}
+which(test_MSE_full == min(test_MSE_full))
+min(test_MSE_full)
+```
+
+(f) How does the model at which the test set MSE is minimized compare to the true model used to generate the data? Comment on the coefficient values.
+<br>
+Comparing the coefficients with beta, we can note that the model was able to catch all the variables that are 0. The other predicted beta terms are also quite close to the actual ones. (Ideally X16 should've been 0 but we can ignore the small value 3.299202e-06)
+
+```{r, results = "hide"}
+
+coef(regfit.full, 15)
+
+beta
+
+```
+
+ (g) Create a plot displaying of $\sqrt{\sum_{j=1}^p(\beta_j-\hat{\beta}_j^r)^2}$ for a range of values of $r$, where $\hat{\beta}_j^r$ is the jth coefficient estimate for the best model containing $r$ coefficients. Comment on what you observe. How does this compare to the test MSE plot from (d)?
+<br>
+The MSE plot gave the minimum error value at 15 variable model while using beta-error we are getting the minimum at 14 variables. However, there is very little difference in the error values for 14 and 15 variable models. We can say that beta-error gives a result that was expected.
+
+
+```{r, results = "hide", include = FALSE}
+# names(regfit.full)
+# names(coef(regfit.full, 15))
+# length(coef(regfit.full, 15))
+# length(beta)
+```
+```{r, results = "hide"}
+# object to store error
+beta_error <- matrix(rep(NA, 20))
+
+# get the column names corresponding to the beta values
+beta_names <- colnames(full_data)
+
+# remove the response term from names
+beta_names <- beta_names[-1]
+
+# assign column names to beta values
+names(beta) <- beta_names
+
+for (i in 1:20){
+    # catch the coefficients for each model
+    beta_i = coef(regfit.full, i)
+    
+    # calculate error due to intercept and remove the intercept term from beta_i
+    err_intercept <- beta_i[1]^2
+    beta_i <- beta_i[-1]
+    
+    # calculate errors due to features present in the beta_i model
+    err_var_present <- sum((beta[beta_names %in% names(beta_i)] - beta_i)^2)
+    
+    # calculate errors due to features absent from the model
+    err_var_absent <- sum(beta[!(beta_names %in% names(beta_i))]^2)
+    
+    # calculate and store total error
+    beta_error[i] <- sqrt(err_intercept + err_var_present + err_var_absent)
+    
+}
+
+plot(beta_error, type = 'b', xlab = "No. of variables", ylab = "Beta Error")
+
+which(beta_error == min(beta_error))
+```
+
+2) This question uses the “Weekly” dataset in the ISLR package. The data contains information for weekly returns for 21 years, beginning in 1990 and ending in 2010.
+a) Produce some numerical and graphical summaries of the “Weekly” data. Do there appear to be any patterns?
+
+```{r}
+data(Weekly)
+
+raw_Weekly <- as.data.frame(Weekly)
+
+dim(raw_Weekly)
+head(raw_Weekly)
+
+summary(raw_Weekly)
+
+plot(raw_Weekly)
+# There doesn't seem to be any obvious linear relationship between the variables. We can also check the correlation plot
+
+corrplot(cor(raw_Weekly[, -9]))
+# Only volume and Year are correlated
+
+```
+
+b) Use the full data to perform logistic regression with “Direction” as the response and the five lag variables, plus volume, as predictors. Use the summary function to print the results. Do any of the predictors appear to be statistically significant? Comment on these.
+<br>
+- According to the model only Lag2 appears to be significant at significance 0.05.
+
+```{r}
+
+glm.fit <- glm(Direction ~ . - Year - Today, data = Weekly, family = 'binomial')
+summary(glm.fit)
+# names(glm.fit)
+
+# Only Lag2 is significant
+
+```
+
+c) Compute the “confusion matrix” and overall fraction of correct predictions. Explain what the confusion matrix is telling you about the types of mistakes made by logistic regression.
+<br>
+- Overall accuracy of the model is about 56%. For 'UP' values, the model had an accuracy of 92.07% while for the 'DOWN' the accuracy was 11.16%. Thus the model is not performing well for 'DOWN' values
+
+```{r}
+
+glm.probs <- predict.glm(glm.fit, newdata = Weekly, type = 'response')
+y_hat_values <- round(glm.probs)
+
+y_true_values <- as.numeric(Weekly$Direction) - 1
+
+conf <- confusionMatrix(as.factor(y_hat_values), as.factor(y_true_values))
+conf
+
+```
+d) Fit the logistic model using a training data period from 1990-2008, with “Lag2” as the only predictor. Compute the confusion matrix, and the overall correct fraction of predictions for the held out data (that is, the data from 2009 and 2010).
+<br>
+- Model accuracy is observed to  be 62.5% for the test data. However, we can notice from the confusion matrix that the model still performs poorly for 'DOWN' values, with the accuracy being about 21%.
+
+```{r}
+
+train_Weekly = Weekly[Weekly$Year < 2009, ]
+test_Weekly = Weekly[Weekly$Year == 2009 | Weekly$Year == 2010, ]
+
+y_true_train_Weekly <- as.numeric(train_Weekly$Direction) - 1
+y_true_test_Weekly <- as.numeric(test_Weekly$Direction) - 1
+
+glm.fit2 <- glm(Direction ~ Lag2, family = 'binomial', data = train_Weekly)
+summary(glm.fit2)
+
+glm.probs2 <- predict.glm(glm.fit2, newdata = test_Weekly, type = 'response')
+y_hat_test_values <- round(glm.probs2)
+
+conf2 <- confusionMatrix(as.factor(y_hat_test_values), as.factor(y_true_test_Weekly))
+conf2
+```
+e) Repeat (d) using LDA.
+<br>
+- It was observed that LDA gave the same result as Logistic Regression.
+
+```{r}
+lda.fit <- lda(Direction ~ Lag2, data = train_Weekly)
+lda.fit
+
+# plot(lda.fit)
+
+lda.pred <- predict(lda.fit, newdata = test_Weekly)
+# class(lda.pred)
+# names(lda.pred)
+
+# data.frame(lda.pred$class, lda.pred$posterior, lda.pred$x)
+
+y_hat_test_lda <- as.numeric(lda.pred$class) - 1
+
+conf3 <- confusionMatrix(as.factor(y_hat_test_lda), as.factor(y_true_test_Weekly))
+conf3
+```
+f) Repeat (d) using KNN with k=1.
+<br>
+- KNN (with k = 1) gave the worst accuracy at 51%.
+
+```{r}
+
+train.X <- train_Weekly["Lag2"]
+test.X <- test_Weekly["Lag2"]
+
+knn.pred_test <- knn(train.X, test.X, y_true_train_Weekly, 1)
+
+conf4 <- confusionMatrix(as.factor(knn.pred_test), as.factor(y_true_test_Weekly))
+conf4
+
+```
+g) Which method appears to provide the best results?
+<br>
+- Both Linear Regression and LDA gave the best results,with 62.5% accuracy.
+
+h) Experiment with different combinations of predictors, including possible
+transformations and interactions, for each method. Report the variables, method, and associated confusion matrix that appears to provide the best results on the held-out data. Note that you should also experiment with values for K in the kNN classifier.
+- I tried with different combinations of variables and KNN with different values of k. But it seems LDA and Logistic Regression are still the best performing models
+
+```{r}
+##############################################################################
+#### Testing the error for some interactions
+##############################################################################
+
+# In the original model with all variables Lag1 was almost significant at 0.1 level, so I'm going to add it to the model. I am also adding the interaction between Lag2 and Lag1, and Lag2 and Lag4 to see if the model improves.
+glm.fit3 <- glm(Direction ~ Lag2 * Lag1 + Lag2:Lag4, family = 'binomial', data = train_Weekly)
+summary(glm.fit3)
+# Model seems to have become worse. Lets check accuracy on test data.
+
+glm.probs3 <- predict.glm(glm.fit3, newdata = test_Weekly, type = 'response')
+y_hat_test_values <- round(glm.probs3)
+
+conf5 <- confusionMatrix(as.factor(y_hat_test_values), as.factor(y_true_test_Weekly))
+conf5
+# Accuracy of 57.7%. Worse than the previous best models
+
+#L Lets us check LDA accuracy using these variables
+lda.fit2 <- lda(Direction ~ Lag2 * Lag1 + Lag2:Lag4, data = train_Weekly)
+lda.pred2 <- predict(lda.fit2, newdata = test_Weekly)
+y_hat_test_lda <- as.numeric(lda.pred2$class) - 1
+
+conf6 <- confusionMatrix(as.factor(y_hat_test_lda), as.factor(y_true_test_Weekly))
+conf6
+# Same accuracy of 57.7%
+
+##############################################################################
+#### Testing the accuracy for different values of k 
+##############################################################################
+
+knn_accuracy_store <- matrix(rep(NA, 20))
+
+# Ideally we should consider only odd k values since even values may not segregate the classes well. However, since I'm not going to use the k values for further analysis, I'm using even values as well.
+
+for (i in 1:20){
+    
+    knn.pred_test <- knn(train.X, test.X, y_true_train_Weekly, i)
+    conf <- confusionMatrix(as.factor(knn.pred_test), as.factor(y_true_test_Weekly))
+    
+    knn_accuracy_store[i] <- conf$overall['Accuracy']
+    # print(knn_accuracy_store[i])
+}
+
+plot(knn_accuracy_store, type = 'b', xlab = "k", ylab = "Accuracy")
+
+# KNN accuracy increased for k = 8 and k = 17 but it's still lower than the accuracy of Logistic Regression and LDA at 62.5%
+
+```
+
+3)Consider the Diabetes dataset (posted with assignment). Assume the
+population prior probabilities are estimated using the relative frequencies of the
+classes in the data.
+
+```{r}
+
+load('~/Desktop/UB Courses/Sem 1/Statistical Data Mining/Codes/Diabetes.RData')
+
+head(Diabetes)
+dim(Diabetes)
+summary(Diabetes)
+```
+
+(a) Produce pairwise scatterplots for all five variables, with different symbols or
+colors representing the three different classes. Do you see any evidence that the
+classes may have difference covariance matrices? That they may not be
+multivariate normal?
+- The line plots seem to suggest that the variables are more or less normally distributed. However, the scatterplots show that the Overt_Diabetic class is spread over the whole range for almost all the pairs, while Normal and Chemical_diabetic classes are more bunched together. I would infer, from the pairs plots, that the classes have different covariance matrices
+
+```{r}
+
+ggpairs(Diabetes, columns = 1:5, aes(color = group, alpha = 0.5), upper = list(continuous = wrap("cor", size = 2.5)))
+
+```
+
+(b) Apply linear discriminant analysis (LDA) and quadratic discriminant analysis
+(QDA). How does the performance of QDA compare to that of LDA in this case?
+<br>
+- QDA is more accurate with accuracy = 95.2% whereas LDA has an accuracy of 90.3%
+
+```{r}
+
+
+lda.fit <- lda(group ~ ., data = Diabetes)
+# lda.fit
+
+lda.pred3b <- predict(lda.fit, newdata = Diabetes)
+
+conf3b1 <- confusionMatrix(as.factor(Diabetes$group), as.factor(lda.pred3b$class))
+conf3b1
+
+qda.fit <- qda(group ~ ., data = Diabetes)
+# qda.fit
+
+qda.pred3b <- predict(qda.fit, newdata = Diabetes)
+
+conf3b2 <- confusionMatrix(as.factor(Diabetes$group), as.factor(qda.pred3b$class))
+conf3b2
+```
+
+(c) Suppose an individual has (glucose test/intolerence = 68, insulin test=122,
+SSPG = 544. Relative weight = 1.86, fasting plasma glucose = 184). To which
+class does LDA assign this individual? To which class does QDA?
+<br>
+- LDA assigns the individual to Normal class whereas QDA assigns to Overt_Diabetic
+
+```{r}
+X <- data.frame(1.86, 184, 68, 122, 544)
+
+Xnames <- colnames(Diabetes)
+Xnames <- Xnames[-6]
+
+names(X) <- Xnames
+
+lda.pred <- predict(lda.fit, newdata = X)
+lda.pred
+
+qda.pred <- predict(qda.fit, newdata = X)
+qda.pred
+
+```

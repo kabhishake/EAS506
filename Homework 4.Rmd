@@ -1,0 +1,617 @@
+---
+title: "Homework 4"
+author: "Abhishek Kumar"
+date: "11/1/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, results = "hide", message = FALSE}
+
+rm(list = ls())
+
+# install.packages('ISLR2')
+# install.packages('bootstrap')
+# install.packages('rpart')
+
+library(ISLR2)
+library(bootstrap)
+library(boot)
+library(leaps)
+library(rpart)
+library(caret)
+library(klaR)
+library(class)
+library(GGally)
+library(reshape2)
+
+set.seed(8)
+```
+1) For the Boston data in the ISLR2 package:
+
+$>$ library(ISLR2)
+<br>
+$>$ data(Boston)
+<br>
+$>$ ?Boston
+
+Using best subset regression analysis fit models for “medv” (median value of
+owner-occupied homes in $1000s). Perform model selection using the AIC, BIC,
+five-and tenfold cross-validation, and bootstrap .632 estimates of prediction
+error. Comment on your results and the differences in the selected model.
+<br>
+- Regsubsets doesn't return the AIC for the model. However, in this case Cp can taken as proxy for AIC. Both Cp and BIC are minimum for the 11 variable model with the following variables - crim, zn, chas, nox, rm, dis, rad, tax, ptratio, black, lstat.
+<br>
+- Almost all models in 5-fold and 10-fold cross validation are also returning the same variables as above.
+<br>
+- Bootstrap method returns 12 variable model as the best model. It includes the variable 'indus' along with the other variables mentioned above
+- As expected, using the exhaustive subset selection without cross-validation or bootstraping gives the lowest errors since it just returns the training error. After that, bootstrap method gives the least error.
+- We can also note that after the 5th variable, error doesn't decrease much. So if computation time was an issue, we could go ahead with a 5-variable model.
+
+```{r}
+
+data(Boston)
+?Boston
+head(Boston)
+summary(Boston)
+
+#################################################
+## Fit the best subset model
+#################################################
+
+fit = regsubsets(medv ~ ., data = Boston, method="exhaustive", nvmax = 13)
+my_summary=summary(fit)
+select = summary(fit)$outmat
+
+par(mfrow = c(1, 2))
+plot(my_summary$cp, xlab = "No. of variables", ylab = "Cp (proxy for AIC)", type ="o")
+plot(my_summary$bic, xlab = "No. of variables", ylab = "BIC", type ="o")
+
+which(my_summary$cp == min(my_summary$cp))
+which(my_summary$bic == min(my_summary$bic))
+
+# Both cp and bic return the same model for minimum error which is the 11-variable model
+# The coefficients of this model are:
+coef(fit, 11)
+```
+```{r}
+#################################################
+## Training MSE for the best subset model without CV
+#################################################
+
+####################################################################
+# Function for looking at subset selection using test/training data
+####################################################################
+predict.regsubsets = function(object, newdata, id){
+    form = as.formula(object$call[[2]])
+    mat = model.matrix(form, newdata)
+    coefi = coef(object,id=id)
+    xvars=names(coefi)
+    mat[,xvars]%*%coefi
+}
+
+
+# Create X and Y
+X <- Boston[, - which(colnames(Boston) == 'medv')]
+Y <- Boston[, which(colnames(Boston) == 'medv')]
+
+# object to store error
+train_MSE_best <- matrix(rep(NA, 13))
+
+# calculating and storing the errors
+for (i in 1:13){
+    # make the predictions
+    y_hat_train_best = predict(fit, newdata = Boston, id = i)
+    
+    # compare the prediction with the true
+    train_MSE_best[i] = (1/length(Y)) * sum((Y - y_hat_train_best)^2)
+}
+
+# Plotting the training set MSEs
+# quartz()
+#plot(train_MSE_best, col = "blue", type = "b", xlab = "No. of variables", ylab = "MSE")
+
+```
+```{r}
+
+#################################################
+## 5-fold and 10-fold cross validation
+#################################################
+
+# Shuffling the data before dividing it into folds (not necessary but I think if the data was sorted by some value this would make sense)
+shuffled_Boston <- Boston[sample(nrow(Boston)), ]
+  
+## 5-folds
+folds_5 <- cut(seq(1,nrow(shuffled_Boston)),breaks=5,labels=FALSE)
+
+## Initialising a 5 x 13 matrix to store errors
+error_folds_5 <- matrix(nrow = 5, ncol = 13)
+
+## Initialising a 5 x 1 matrix to store model with min error for each i
+min_errors_5fold <- matrix(nrow = 5)
+
+## Most important variables for each fold
+var_min_5fold <- matrix(nrow = 5)
+
+## Performing regsubsets over all the folds
+for (i in 1:5){
+  # Divide the data into test and train for fold i
+  test_indis <- which(folds_5 == i, arr.ind=TRUE)
+  testData <- shuffled_Boston[test_indis, ]
+  trainData <- shuffled_Boston[-test_indis, ]
+  
+  y_true_test <- testData[, which(colnames(testData) == 'medv')]
+  
+  # Fit exhaustive model using regsubsets for fold i
+  fit.cv.5 = regsubsets(medv ~ ., data = trainData, method="exhaustive", nvmax = 13)
+  
+  # Check the performance on test data and store errors
+  
+  for (j in 1:13){
+    # make the predictions
+    y_hat_test = predict(fit.cv.5, newdata = testData, id = j)
+    
+    # compare the prediction with the true
+    error_folds_5[i, j] <- (1/length(y_true_test)) * sum((y_true_test - y_hat_test)^2)
+  }
+  
+  # Check the min test error and min error model size for the fold i
+  min_errors_5fold[i] <- which(error_folds_5[i, ] == min(error_folds_5[i, ]))
+  
+  var_min_5fold[i] <- sapply(list(names(coef(fit,min_errors_5fold[i, ]))), paste, collapse = " ")
+  
+}
+  
+# Plot errors for each fold
+par(mfrow = c(2,3))
+plot(error_folds_5[1, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 1")
+plot(error_folds_5[2, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 2")
+plot(error_folds_5[3, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 3")
+plot(error_folds_5[4, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 4")
+plot(error_folds_5[5, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 5")
+
+```
+```{r}
+# Look at important variables for each fold
+var_min_5fold
+
+# Since similar variables are considered by each fold (barring a few exceptions) we can check the graph of mean 5-fold CV error to select a model
+mean_error_cv5 = sapply(as.data.frame(error_folds_5), mean)
+
+plot(mean_error_cv5, col = "black", type = "b", main = "Average 5 Fold CV errors", ylab = "MSE")
+```
+```{r, include = FALSE, results = "hide"}
+#par(mfrow=c(2,1))
+plot(error_folds_5[1, ], col = "blue", type = "b",  pch = 21, ylim = c(17,45), xlab = "No. of variables", ylab = "CV error", main = "5 fold CV errors for each variable model (fold# used as test set)")
+lines(error_folds_5[2, ], col = "green", type = "b", pch = 22)
+lines(error_folds_5[3, ], col = "red", type = "b", pch = 23)
+lines(error_folds_5[4, ], col = "darkgray", type = "b", pch = 24)
+lines(error_folds_5[5, ], col = "black", type = "b", pch = 25)
+legend("topright", legend = c("Fold 1", "Fold 2", "Fold 3", "Fold 4", "Fold 5"),
+  text.col = c("blue", "green", "red", "darkgray", "black"), 
+  pch = c(21, 22, 23, 24, 25), 
+  col = c("blue", "green", "red", "darkgray", "black"))
+```
+
+
+```{r}
+
+## 10-folds
+folds_10 <- cut(seq(1,nrow(shuffled_Boston)),breaks=10,labels=FALSE)
+
+## Initialising a 10 x 13 matrix to store errors
+error_folds_10 <- matrix(nrow = 10, ncol = 13)
+
+## Initialising a 10 x 1 matrix to store model with min error for each i
+min_errors_10fold <- matrix(nrow = 10)
+
+## Most important variables for each fold
+var_min_10fold <- matrix(nrow = 10)
+
+## Performing regsubsets over all the folds
+for (i in 1:10){
+  # Divide the data into test and train for fold i
+  test_indis <- which(folds_10 == i, arr.ind=TRUE)
+  testData <- shuffled_Boston[test_indis, ]
+  trainData <- shuffled_Boston[-test_indis, ]
+  
+  y_true_test <- testData[, which(colnames(testData) == 'medv')]
+  
+  # Fit exhaustive model using regsubsets for fold i
+  fit.cv.10 = regsubsets(medv ~ ., data = trainData, method="exhaustive", nvmax = 13)
+  
+  # Check the performance on test data and store errors
+  
+  for (j in 1:13){
+    # make the predictions
+    y_hat_test = predict(fit.cv.10, newdata = testData, id = j)
+    
+    # compare the prediction with the true
+    error_folds_10[i, j] <- (1/length(y_true_test)) * sum((y_true_test - y_hat_test)^2)
+  }
+  
+  # Check the min test error and min error model size for the fold i
+  min_errors_10fold[i] <- which(error_folds_10[i, ] == min(error_folds_10[i, ]))
+  
+  var_min_10fold[i] <- sapply(list(names(coef(fit,min_errors_10fold[i, ]))), paste, collapse = " ")
+}
+  
+# Plot errors for each fold
+par(mfrow = c(3,4))
+plot(error_folds_10[1, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 1")
+plot(error_folds_10[2, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 2")
+plot(error_folds_10[3, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 3")
+plot(error_folds_10[4, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 4")
+plot(error_folds_10[5, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 5")
+plot(error_folds_10[6, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 6")
+plot(error_folds_10[7, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 7")
+plot(error_folds_10[8, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 8")
+plot(error_folds_10[9, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 9")
+plot(error_folds_10[10, ], col = "blue", type = "b", xlab = "No. of variables", ylab = "test MSE", main = "Fold 10")
+```
+
+```{r}
+# Look at important variables for each fold
+var_min_10fold
+
+# Some folds have returned different low error models. But mostly they agree that 11-variable model is the best with the same variables as given by AIC, BIC and 5 fold CV. The differences could be because of unfortunate splits 
+
+# Since similar variables are considered by each fold (barring a few exceptions) we can check the graph of mean 10-fold CV error to select a model
+mean_error_cv10 = sapply(as.data.frame(error_folds_10), mean)
+
+plot(mean_error_cv10, col = "black", type = "b", main = "Average 10 Fold CV errors", ylab = "MSE")
+```
+
+```{r, include = FALSE, results = "hide"}
+plot(error_folds_10[1, ], col = "blue", type = "b",  pch = 21, ylim = c(15,65), xlab = "No. of variables", ylab = "CV error", main = "10 fold CV errors for each variable model (fold# used as test set)")
+lines(error_folds_10[2, ], col = "green", type = "b")
+lines(error_folds_10[3, ], col = "red", type = "b")
+lines(error_folds_10[4, ], col = "deeppink", type = "b")
+lines(error_folds_10[5, ], col = "purple", type = "b")
+lines(error_folds_10[6, ], col = "black", type = "b")
+lines(error_folds_10[7, ], col = "brown", type = "b")
+lines(error_folds_10[8, ], col = "darkgray", type = "b")
+lines(error_folds_10[9, ], col = "orange", type = "b")
+lines(error_folds_10[10, ], col = "navy", type = "b")
+```
+
+```{r}
+#################################################
+## Bootstrap
+#################################################
+
+# create functions that feed into "bootpred"
+beta.fit <- function(X, Y) {
+	lsfit(X, Y)	
+}
+
+beta.predict <- function(fit, X) {
+	cbind(1, X) %*% fit$coef
+}
+
+sq.error <- function(Y,Yhat) {
+	(Y - Yhat)^2
+}
+
+# search over the best possible subsets of size "k"
+
+error_store <- c()
+
+for (i in 1:13) {
+	# Pull out the model
+	temp <- which(select[i, ] == "*")
+	
+	res <- bootpred(X[, temp], Y, nboot = 50, theta.fit = beta.fit, theta.predict = beta.predict, err.meas = sq.error) 
+	error_store <- c(error_store, res[[3]])
+}
+
+# quartz()
+plot(error_store, type = "b", lty = 1, col = "red", ylab = "MSE", main = "Bootstrap Errors")
+
+which(error_store == min(error_store)) # 12
+which(select[12, ] == "*")
+
+
+```
+```{r}
+#################################################
+## Plotting all the errors together
+#################################################
+
+plot(train_MSE_best, col = "blue", type = "b", xlab = "No. of variables", ylab = "MSE")
+lines(error_store, type = "b", lty = 1, col = "red")
+lines(mean_error_cv5, type = "b", lty = 1, col = "green")
+lines(mean_error_cv10, type = "b", lty = 1, col = "darkgray")
+legend("topright",legend=c("Exhaustive","Bootstrap", "5 fold CV", "10 fold CV"),
+  text.col=c("blue","red","green","darkgray"),pch=c(21,21,21,21),col=c("blue","red","green","darkgray"))
+
+```
+
+\newpage
+
+2) Use the same Boston dataset that you used in Question 1. Fit classification
+models in order to predict whether a given census tract has a crime rate above or
+below the median. Explore logistic regression, LDA, knn and CART. Describe
+your findings. (Hint: you will have to “create” this new response variable from the
+“crim” variable)
+- Using hold out method to keep 20% of the data as test set, different models gave the following accuracies:
+<br>
+-- Logistic Regression = 84.31%
+<br>
+-- LDA = 85.29%
+<br>
+-- knn (for k = 5) = 92.16%
+<br>
+-- CART (using pruned tree) = 94.12%
+
+CART has performed well in classifying the test data and knn (k = 5) has also given good accuracy. Linear Regression and LDA haven't performed well on this data.
+```{r}
+
+my_Boston <- Boston
+my_Boston$crim <- ifelse(my_Boston$crim > median(my_Boston$crim), 1, 0)
+
+train_indis <- sample(c(1:length(my_Boston[, 1])), size = 0.8 * length(my_Boston[, 1]), replace = FALSE)
+
+train_Boston <- my_Boston[train_indis, ]
+test_Boston <- my_Boston[-train_indis, ]
+
+y_true_test <- as.numeric(test_Boston$crim)
+```
+```{r}
+#################################################
+## Logistic Regression
+#################################################
+
+glm.fit.2 <- glm(crim ~ ., data = train_Boston, family = 'binomial')
+# summary(glm.fit.2)
+
+glm.probs.2 <- predict.glm(glm.fit.2, newdata = test_Boston, type = 'response')
+y_hat_test_glm <- round(glm.probs.2)
+
+glm.conf.2 <- confusionMatrix(as.factor(y_hat_test_glm), as.factor(y_true_test))
+glm.conf.2
+```
+```{r}
+#################################################
+## LDA
+#################################################
+
+lda.fit.2 <- lda(crim ~ ., data = train_Boston)
+# lda.fit.2
+
+lda.pred.2 <- predict(lda.fit.2, newdata = test_Boston)
+
+y_hat_test_lda <- as.numeric(lda.pred.2$class) - 1
+
+lda.conf.2 <- confusionMatrix(as.factor(y_hat_test_lda), as.factor(y_true_test))
+lda.conf.2
+```
+```{r}
+#################################################
+## KNN
+#################################################
+
+train.X.2 <- train_Boston[, - which(colnames(train_Boston) == 'crim')]
+test.X.2 <- test_Boston[, - which(colnames(test_Boston) == 'crim')]
+
+train.Y.2 <- train_Boston[, which(colnames(train_Boston) == 'crim')]
+test.Y.2 <- test_Boston[, which(colnames(test_Boston) == 'crim')]
+
+k_values <- c(1,3,5,7,9,11,13,15,17,19,21,23,25)
+knn_accuracy_store <- matrix(rep(NA, length(k_values)))
+
+i = 0
+
+for (k in k_values){
+
+    knn.pred_test <- knn(train.X.2, test.X.2, train.Y.2, k)
+    conf <- confusionMatrix(as.factor(knn.pred_test), as.factor(test.Y.2))
+    
+    i = i + 1
+    knn_accuracy_store[i] <- conf$overall['Accuracy']
+    # print(knn_accuracy_store[k])
+}
+
+plot(knn_accuracy_store, type = 'b', xlab = "k", ylab = "Accuracy", xaxt = "n")
+axis(1, at = seq(1,length(k_values)), labels = k_values)
+
+```
+```{r}
+k_values[which(knn_accuracy_store == max(knn_accuracy_store))] # 5 and 7
+
+y_hat_test_knn <- knn(train.X.2, test.X.2, train.Y.2, 5)
+knn.conf.2 <- confusionMatrix(as.factor(y_hat_test_knn), as.factor(test.Y.2))
+knn.conf.2
+```
+```{r}
+#################################################
+## CART
+#################################################
+
+model.control.2 <- rpart.control(minsplit = 5, xval = 10, cp = 0)
+cart.fit.2 <- rpart(crim ~ ., data = train_Boston, method = "class", control = model.control.2)
+
+# summary(cart.fit.2) ## --------- just checking the summary
+# names(cart.fit.2) ## --------- just checking the names
+# cart.fit.2$splits
+# cart.fit.2$cptable
+
+# quartz()
+plot(cart.fit.2, branch = 1, uniform = TRUE, compress = TRUE)
+text(cart.fit.2, use.n = TRUE, all = TRUE, cex = 0.5)
+
+# quartz()
+plot(cart.fit.2$cptable[, 4], main = "Cp for Model Selection", type = "b")
+
+min_cp = which.min(cart.fit.2$cptable[,4])
+prune.cart.fit.2 <- prune(cart.fit.2, cp = cart.fit.2$cptable[min_cp, 1])
+
+# quartz()
+plot(prune.cart.fit.2, branch = 1, compress = TRUE, main = "Pruned Tree")
+text(prune.cart.fit.2, cex = 0.5)
+
+# using the pruned tree to make predictions
+pred.test.prune <- predict(prune.cart.fit.2, newdata = test_Boston, type = "class")
+# pred.test.prune
+
+cart.conf.2 <- confusionMatrix(as.factor(pred.test.prune), as.factor(test.Y.2))
+cart.conf.2
+
+```
+3) In this problem, you will develop a model to predict whether a given
+car gets high or low gas mileage based on the Auto data set.
+```{r}
+data(Auto)
+
+head(Auto)
+summary(Auto)
+```
+(a) Create a binary variable, mpg01, that contains a 1 if mpg contains
+a value above its median, and a 0 if mpg contains a value below
+its median. You can compute the median using the median()
+function. Note you may find it helpful to use the data.frame()
+function to create a single data set containing both mpg01 and
+the other Auto variables.
+```{r}
+
+mpg01 <- ifelse(Auto$mpg > median(Auto$mpg), 1, 0)
+
+my_Auto <- data.frame(mpg01, Auto[, -c(1, 9)])
+```
+(b) Explore the data graphically in order to investigate the association between
+mpg01 and the other features. Which of the other features seem most likely to be
+useful in predicting mpg01? Scatterplots and boxplots may be useful tools to
+answer this question. Describe your findings.
+- From the scatterplots and boxplots, it seems that acceleration, year and origin are not very useful in classifying mpg01 well. Acceleration seems to have some influence because it is segregating the outliers well, but the values within first and third quartile are not getting segregated well. The other variables are important.
+- I will remove acceleration, year and origin since we only need to consider variables that seem most associated withh mpg01
+```{r}
+
+plot(my_Auto[, 1:4])
+
+plot(my_Auto[, c(1, 5:8)])
+```
+```{r}
+par(mfrow = c(2,4))
+boxplot(cylinders ~ mpg01, data = my_Auto)
+boxplot(displacement ~ mpg01, data = my_Auto)
+boxplot(horsepower ~ mpg01, data = my_Auto)
+boxplot(weight ~ mpg01, data = my_Auto)
+boxplot(acceleration ~ mpg01, data = my_Auto)
+boxplot(year ~ mpg01, data = my_Auto)
+boxplot(origin ~ mpg01, data = my_Auto)
+```
+```{r, results = 'hide', include = FALSE}
+# dats_melted <- melt(my_Auto, id.var = 'mpg01')
+
+# ggplot(data = dats_melted, aes(x = mpg01, y = value)) +
+#   geom_boxplot() + 
+#   geom_point(aes(y = value, color = mpg01), position = position_dodge(width=0.75)) +
+#   facet_wrap(~ variable, ncol = 4, scales = "free")
+
+# ggpairs(my_Auto, columns = 2:8, aes(color = as.factor(mpg01), alpha = 0.5), upper = list(continuous = wrap("cor", size = 2.5)))
+```
+(c) Split the data into a training set and a test set.
+```{r}
+
+my_Auto <- my_Auto[, !(colnames(my_Auto) %in% c("acceleration", "origin", "year"))]
+
+train_indis <- sample(c(1:length(my_Auto[, 1])), size = 0.8 * length(my_Auto[, 1]), replace = FALSE)
+
+train_Auto <- my_Auto[train_indis, ]
+test_Auto <- my_Auto[-train_indis, ]
+
+y_true_test <- test_Auto[, 1]
+
+```
+(d) Perform LDA on the training data in order to predict mpg01
+using the variables that seemed most associated with mpg01 in (b). What is the
+test error of the model obtained?
+<br>
+- Test Error = 1 - Accuracy = 12.66%
+```{r}
+
+lda.fit.3 <- lda(mpg01 ~ ., data = train_Auto)
+# lda.fit.3
+
+lda.pred.3 <- predict(lda.fit.3, newdata = test_Auto)
+
+y_hat_values_lda <- as.numeric(lda.pred.3$class) - 1
+
+lda.conf.3 <- confusionMatrix(as.factor(y_hat_values_lda), as.factor(y_true_test))
+lda.conf.3
+
+```
+(e) Perform QDA on the training data in order to predict mpg01 using the
+variables that seemed most associated with mpg01 in (b). What is the test error
+of the model obtained?
+<br>
+- Test Error = 1 - Accuracy = 12.66%
+- It's notable that both LDA and QDA have given same test errors
+```{r}
+
+qda.fit.3 <- qda(mpg01 ~ ., data = train_Auto)
+# qda.fit.3
+
+qda.pred.3 <- predict(qda.fit.3, newdata = test_Auto)
+
+y_hat_values_qda <- as.numeric(qda.pred.3$class) - 1
+
+qda.conf.3 <- confusionMatrix(as.factor(y_hat_values_qda), as.factor(y_true_test))
+qda.conf.3
+
+```
+(f) Perform logistic regression on the training data to predict mpg01 using the
+variables that seemed most associated with mpg01 in (b). What is the test error
+of the model obtained?
+<br>
+- Test Error = 1 - Accuracy = 12.66%
+- It's notable that all models - LDA, QDA and Logistic Regression, have given same test errors. However, the confusion matrices have different values.
+```{r}
+
+glm.fit.3 <- glm(mpg01 ~ ., data = train_Auto, family = 'binomial')
+
+glm.probs.3 <- predict.glm(glm.fit.3, newdata = test_Auto, type = 'response')
+y_hat_test_values <- round(glm.probs.3)
+
+glm.conf.3 <- confusionMatrix(as.factor(y_hat_test_values), as.factor(y_true_test))
+glm.conf.3
+```
+(h) Perform KNN on the training data, with several values of K, in order to predict
+mpg01. Use only the variables that seemed most associated with mpg01 in (b).
+What test errors do you obtain? Which value of K seems to perform the best on
+this data set?
+<br>
+- KNN gave the best result for k = 1, with error = 11.39%
+```{r}
+
+train.X.3 <- train_Auto[, -1]
+test.X.3 <- test_Auto[, -1]
+
+train.Y.3 <- train_Auto[, 1]
+test.Y.3 <- test_Auto[, 1]
+
+k_values <- c(1,3,5,7,9,11,13,15,17,19,21,23,25)
+knn_error_store <- matrix(rep(NA, length(k_values)))
+
+i = 0
+
+for (k in k_values){
+
+    knn.pred_test <- knn(train.X.3, test.X.3, train.Y.3, k)
+    conf <- confusionMatrix(as.factor(knn.pred_test), as.factor(test.Y.3))
+    
+    i = i + 1
+    knn_error_store[i] <- 1 - conf$overall['Accuracy']
+
+}
+
+plot(knn_error_store, type = 'b', xlab = "k", ylab = "Error", xaxt = "n", main = "Test Errors for different values of k")
+axis(1, at = seq(1,length(k_values)), labels = k_values)
+
+knn.best.pred_test <- knn(train.X.3, test.X.3, train.Y.3, 1)
+knn.conf.3 <- confusionMatrix(as.factor(knn.best.pred_test), as.factor(test.Y.3))
+knn.conf.3
+```

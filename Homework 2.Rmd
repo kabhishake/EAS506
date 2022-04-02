@@ -1,0 +1,506 @@
+---
+title: "Homework 2"
+author: "Abhishek Kumar"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, message = FALSE, results = "hide"}
+###########################################################################
+## Homework 2
+## Abhishek Kumar 
+## Created: Sep 20, 2021
+## Edited: Sep 24, 2021; Sep 26, 2021; Sep 27, 2021; Sep 28, 2021; Oct 4, 2021
+###########################################################################
+
+rm(list = ls())
+# setwd("~/Desktop/UB Courses/Sem 1/Statistical Data Mining/Codes")
+
+# install.packages("leaps")
+# install.packages("caret")
+# install.packages("glmnet")
+# install.packages("ISLR")
+
+library(leaps)
+library(caret)
+library(readr)
+library(ElemStatLearn)
+library(ISLR)
+library(glmnet)
+
+```
+
+
+1) (10 points) Consider the cereal dataset in UBlearns. Suppose that you are getting this data in order to build a predictive model for nutritional rating.
+
+a) Divide the data into test (20% of data) and training (80% of data). Fit a linear model and report the MSE.
+
+After some preprocessing, the data was divided into test and training sets. A linear model was fit on the training data. The training and test errors were computed and found to be:<br>
+- Training MSE: 7.056819e-14 <br>
+- Test MSE: 1.315094e-13 <br>
+As expected, Test MSE is higher than Training MSE.
+
+```{r, message = FALSE, results = "hide"}
+
+cereal <- read_csv("Desktop/UB Courses/Sem 1/Statistical Data Mining/Codes/cereal.csv")
+
+dim(cereal)
+head(cereal)
+
+summary(cereal)
+
+# Removing columns name and type. Name is just an identifier and type has only 2 values, out of which 1 value appears only thrice.
+cereal <- cereal[, -c(1, 3)]
+
+# mfr is categorical
+# G and K seem well represented. We can group A, N, P, Q, R together as O for Others
+cereal[cereal$mfr %in% c("A", "N", "P", "Q", "R"), "mfr"] <- "O"
+
+# One-hot encoding mfr column
+dmy <- dummyVars(" ~ .", data = cereal, fullRank = TRUE)
+cereal <- data.frame(predict(dmy, newdata = cereal))
+
+dim(cereal)
+head(cereal)
+```
+
+
+```{r, message = FALSE, results = "hide"}
+
+# Creating training and test datasets 
+
+set.seed(123)
+train_indis <- sample(c(1:length(cereal[, 1])), size = round(0.8 * length(cereal[, 1])), replace = FALSE, prob = NULL)
+
+cereal_train <- cereal[train_indis, ]
+cereal_test <- cereal[-train_indis, ]
+
+y_true_train = cereal_train$rating
+y_true_test = cereal_test$rating
+```
+
+
+```{r, message = FALSE}
+
+# Fitting a linear model and checking the training and test errors
+
+fit <- lm(rating ~ ., data = cereal_train)
+summary(fit)
+# names(fit)
+
+train_MSE <- mean(fit$residuals ^ 2)
+test_MSE <- mean((cereal_test$rating - predict.lm(fit, cereal_test)) ^ 2)
+
+train_MSE
+test_MSE
+```
+
+b) With the data in (a) perform forwards subset selection.
+
+Forward Subset selection was performed and the best model is found to have 9 variables and Test error = 1.165463e-13 <br>
+
+The nine variables are - calories, protein, fat, sodium, fiber, carbo, sugars, potass, vitamins 
+
+
+```{r, message = FALSE, results = "hide"}
+
+# Ideally we should use the full data set when performing subset selection methods but here I'm only using the training data as mentioned in the problem
+
+regfit.fwd <- regsubsets(rating ~ ., data = cereal_train, nbest = 1, nvmax = 14,
+    method = "forward")
+
+# summary(regfit.fwd)
+cereal_fwd_summ <- summary(regfit.fwd)
+cereal_fwd_summ$outmat
+
+# objects to store error
+train_err_store_fwd <- matrix(rep(NA, 14))
+test_err_store_fwd <- matrix(rep(NA, 14))
+
+######################################################
+# Function for looking at subset selection using test/training data
+######################################################
+predict.regsubsets = function(object, newdata, id){
+    form = as.formula(object$call[[2]])
+    mat = model.matrix(form, newdata)
+    coefi = coef(object,id=id)
+    xvars=names(coefi)
+    mat[,xvars]%*%coefi
+}
+
+for (i in 1:14){
+    # make the predictions
+    y_hat_train = predict(regfit.fwd, newdata = cereal_train, id = i)
+    y_hat_test = predict(regfit.fwd, newdata = cereal_test, id = i)
+    
+    # compare the prediction with the true
+    train_err_store_fwd[i] = (1/length(y_true_train))*sum((y_true_train-y_hat_train)^2)
+    test_err_store_fwd[i] = (1/length(y_true_test))*sum((y_true_test-y_hat_test)^2)
+}
+```
+```{r}
+plot(train_err_store_fwd, col = "blue", type = "b", xlab = "No. of variables", ylab = "MSE", ylim = c(0,100))
+lines(test_err_store_fwd, col = "red", type = "b")
+```
+```{r}
+which(test_err_store_fwd == min(test_err_store_fwd))
+min(test_err_store_fwd)
+coef(regfit.fwd, 9)
+```
+
+c) With the data in (a) perform exhaustive subset selection.
+
+Exhaustive Subset selection was performed and the best model is found to have 9 variables and Test error = 1.165463e-13 <br>
+
+The nine variables are - calories, protein, fat, sodium, fiber, carbo, sugars, potass, vitamins <br>
+
+We note that both Forward Subset Selection and Exhaustive Subset Selection are giving the same models as optimum.
+
+```{r, message = FALSE, results = "hide"}
+regfit.full <- regsubsets(rating ~ ., data = cereal_train, nbest = 1, nvmax = 14,
+    method = "exhaustive")
+
+cereal_exh_sum <- summary(regfit.full)
+names(cereal_exh_sum)
+
+par(mfrow = c(2, 2))
+plot(cereal_exh_sum$cp, xlab = "No. of variables", ylab = "Cp", type ="l")
+plot(cereal_exh_sum$bic, xlab = "No. of variables", ylab = "BIC", type ="l")
+plot(cereal_exh_sum$rss, xlab = "No. of variables", ylab = "RSS", type ="l")
+plot(cereal_exh_sum$adjr2, xlab = "No. of variables", ylab = "AdjR2", type ="l")
+
+which(cereal_exh_sum$cp == min(cereal_exh_sum$cp))
+which(cereal_exh_sum$bic == min(cereal_exh_sum$bic))
+which(cereal_exh_sum$rss == min(cereal_exh_sum$rss))
+which(cereal_exh_sum$adjr2 == max(cereal_exh_sum$adjr2))
+
+# objects to store error
+train_err_store_full <- matrix(rep(NA, 14))
+test_err_store_full <- matrix(rep(NA, 14))
+
+for (i in 1:14){
+    # make the predictions
+    y_hat_train = predict(regfit.full, newdata = cereal_train, id = i)
+    y_hat_test = predict(regfit.full, newdata = cereal_test, id = i)
+    
+    # compare the prediction with the true
+    train_err_store_full[i] = (1/length(y_true_train))*sum((y_true_train-y_hat_train)^2)
+    test_err_store_full[i] = (1/length(y_true_test))*sum((y_true_test-y_hat_test)^2)
+}
+```
+
+```{r}
+plot(train_err_store_full, col = "blue", type = "b", xlab = "No. of variables", ylab = "MSE", ylim = c(0,100))
+lines(test_err_store_full, col = "red", type = "b")
+```
+```{r}
+which(test_err_store_full == min(test_err_store_full))
+min(test_err_store_full)
+coef(regfit.full, 9)
+```
+
+d) Draw some conclusions through comparisons between models (a-c). Reflect on the comparative predictive accuracy, and model interpretation. Which model would you say is the “best one” based on your results? Why?
+
+Considering the test errors of the three models:<br>
+MSE_linear = 1.315094e-13 <br>
+MSE_fwd = 1.165463e-13 <br>
+MSE_exh = 1.165463e-13 <br>
+
+Clearly, Fwd subset selection and exhaustive subset selection are better models since they minimize the test error. In general, Exhaustive Selection will give the best model since it considers all possible models and chooses the one that minimises the training error but that can also produce overfitting. I'd prefer Forward selection since that is computationally less expensive. However, here since both the models are giving same results and since the data set is small we can choose any model.
+
+---
+
+a) (10 points) ESL textbook exercise 2.8 modified: Compare the classification performance of linear regression and k-nearest neighbor classification on the zipcode data. In particular, consider only the 4’s and 7’s for this problem, and k = 1,3,5,7,9,11,13,15. Show both the training and the test error for each choice of k. The zipcode data is available in the ElemStatLearn package – or the website for the text ESL for download. Note that you do not have to divide the data into test and training because it is done for you.
+
+```{r, message = FALSE, results = "hide"}
+data(zip.train)
+data(zip.test)
+
+train_47 <- as.data.frame(zip.train[zip.train[, 1] == 4 | zip.train[, 1] == 7, ])
+test_47 <- as.data.frame(zip.test[zip.test[, 1] == 4 | zip.test[, 1] == 7, ])
+
+dim(train_47)
+dim(test_47)
+```
+
+**Classifiation using Linear Regression**
+
+Since this is a classification problem, Output variables 4 & 7 are two categories. I'm encoding them as 0 & 1
+<br>
+Based on the confusion matrix, test error (classification error rate) = 2.88%
+
+```{r, message = FALSE, warning = FALSE, results = "hide"}
+train_47[train_47$V1 == 4, "V1"] <- 0
+train_47[train_47$V1 == 7, "V1"] <- 1
+test_47[test_47$V1 == 4, "V1"] <- 0
+test_47[test_47$V1 == 7, "V1"] <- 1
+
+# Storing the Y values
+y_true_train <- train_47$V1
+y_true_test <- test_47$V1
+
+# fitting a linear model
+fit <- lm(V1 ~ ., data = train_47)
+
+y_hat_train_lr <- predict.lm(fit, newdata = train_47)
+y_hat_test_lr <- predict.lm(fit, newdata = test_47)
+
+# If the value is more than or equal to 0.5 I'm assigning it to class 1, 
+# otherwise to class 0
+
+y_hat_train_lr[y_hat_train_lr >= 0.5] <- 1
+y_hat_train_lr[y_hat_train_lr < 0.5] <- 0
+
+y_hat_test_lr[y_hat_test_lr >= 0.5] <- 1
+y_hat_test_lr[y_hat_test_lr < 0.5] <- 0
+```
+```{r}
+confusion_train <- table(y_hat_train_lr, y_true_train)
+err_train <- 1 - sum(diag(confusion_train)) / sum(confusion_train)
+confusion_train
+err_train
+
+confusion_test <- table(y_hat_test_lr, y_true_test)
+err_test <- 1 - sum(diag(confusion_test)) / sum(confusion_test)
+confusion_test
+err_test
+```
+
+**Classification using KNN**
+<br>
+The KNN test error is initially lower then the regression test error but increases with k. This means that at higher k the model is underfitting. Lowest test error was observed at k = 3 and k = 5. I suspect that at k = 1, the model was overfitting the training data. 
+
+```{r, message = FALSE, results = "hide"}
+require(class)
+
+knn_func <- function(train.X, test.X, train.Y, test.Y, k){
+    knn_train.pred <- knn(train.X, train.X, train.Y, k)
+    confusion_train <- table(knn_train.pred, train.Y)
+    err_train <- 1 - sum(diag(confusion_train)) / sum(confusion_train)
+
+    knn_test.pred <- knn(train.X, test.X, train.Y, k)
+    confusion_test <- table(knn_test.pred, test.Y)
+    err_test <- 1 - sum(diag(confusion_test)) / sum(confusion_test)
+
+    return(c(err_train, err_test))
+}
+
+train_47.X <- train_47[, -1]
+test_47.X <- test_47[, -1]
+
+err_store <- matrix(, nrow = 8, ncol = 3)
+colnames(err_store) <- c("k-value", "training error", "test error")
+err_store[,1] <- c(1,3,5,7,9,11,13,15)
+
+for (i in 1:dim(err_store)[1]){
+    temp <- knn_func(train_47.X, test_47.X, y_true_train, y_true_test, err_store[i,1])
+    err_store[i,2] <- temp[1]
+    err_store[i,3] <- temp[2]
+}
+```
+
+```{r}
+err_store
+
+par(mar = c(5,4,4,8) + 0.1)
+plot(err_store[, 3], col = "red", type = "l", xaxt = "n", xlab = "k-value", ylab = "Test Error")
+axis(1, at = 1:8, labels = c(1,3,5,7,9,11,13,15))
+par(new = TRUE)
+plot(err_store[, 2], col = "blue", type = "l", bty = "n", xaxt = "n", axes = FALSE, xlab = "", ylab = "")
+axis(side = 4)
+mtext("Training Error", side=4, las=0, line = 3)
+legend("topleft",legend=c("Test error","Training error"),
+  text.col=c("red","blue"),pch=c(16,15),col=c("red","blue"))
+
+par(mar = c(5,4,4,8) + 0.1)
+plot(err_store[, 3], col = "red", type = "l", xaxt = "n", xlab = "k-value", ylab = "KNN Test Error")
+axis(1, at = 1:8, labels = c(1,3,5,7,9,11,13,15))
+axis(side = 4)
+mtext("Linear Regression Test Error", side=4, las=0, line = 3)
+abline(h = err_test, col = "blue")
+legend("topleft",legend=c("KNN test error","Linear Regression Test Error"),
+  text.col=c("red","blue"),pch=c(16,15),col=c("red","blue"))
+
+```
+
+<hr/>
+
+b) (10 points) In this exercise, we will predict the number of applications received using the other variables in the College data set in the ISLR package. ** be sure to look closely at this data, you may want to consider the multiscale nature of the problem, and perhaps use a transformation on some of the variables.**
+(a) Split the data set into a training set and a test set. Fit a linear model using least squares on the training set and report the test error obtained.
+<br>
+Since many predictor variables and the response variable had large range (variation of the order of 10^3), I have taken their log transformation to scale them. I have one-hot encoded the column 'Private'. I'm considering the full data set for modeling.
+From my model I found the following test error: <br>
+- test_MSE_scaled = 2.539548 <br>
+- test_MSE_actual = 36154428 <br>
+
+```{r, message = FALSE, results = "hide"}
+data(College)
+raw_College <- as.data.frame(College)
+
+dim(raw_College)
+head(raw_College)
+
+summary(raw_College)
+
+apply(is.na(raw_College), 2, sum)
+# checking for missing values -> No missing values
+```
+<br> Lets plot the data with respect to the response variable 'Apps' to see if there are any obvious relationships
+```{r, echo = FALSE}
+plot(raw_College[, 1:6])
+
+plot(raw_College[, c(2, 7:12)])
+
+plot(raw_College[, c(2, 13:18)])
+```
+
+```{r, message = FALSE, results = "hide"}
+# One-hot encoding Private column
+dmy <- dummyVars(" ~ .", data = raw_College, fullRank = TRUE)
+raw_College <- data.frame(predict(dmy, newdata = raw_College))
+
+# Some variables have a very large range. I'm transforming them using log transformation to reduce this range. This transformation also applies to the Response variable 'Apps' since 'Apps' also has a large range
+
+for (i in 2:dim(raw_College)[2]){
+  if (min(raw_College[, i])/max(raw_College[, i]) < 0.005){
+    raw_College[, i] <- log(raw_College[, i]+1)  # Adding 1 to account for 0s
+    names(raw_College)[i] <- paste("log", names(raw_College)[i], sep = "_")
+  }
+}
+
+summary(raw_College)
+```
+<br> Lets plot the data again
+```{r, echo = FALSE}
+plot(raw_College[, 1:6], las = 2)
+
+plot(raw_College[, c(2, 7:12)], las = 2)
+
+plot(raw_College[, c(2, 13:18)], las = 2)
+```
+<br>
+We can note from the graphs that transforming the response variable has destroyed its linear relationship with some of the predictor variables like "Enroll". However, log_Apps has a seemingly linear relationship with most of the other variables. It would not make sense to transform the other variables as it would introduce non-linearity and may make the models worse. Therefore, I'm leaving the other variables as they are.
+
+```{r, message = FALSE, results = "hide"}
+
+# Now, my dataset is processed and I can divide it into training and test sets
+# Creating training and test datasets - 80% training, 20% test
+set.seed(123)
+train_indis <- sample(c(1:length(raw_College[, 1])), size = round(0.8 * length(raw_College[, 1])), replace = FALSE, prob = NULL)
+
+college_train <- na.omit(raw_College[train_indis, ])
+college_test <- na.omit(raw_College[-train_indis, ])
+
+fit <- lm(log_Apps ~ ., data = college_train)
+```
+
+```{r, warning = FALSE}
+test_MSE_scaled <- mean((college_train$log_Apps - predict.lm(fit, college_test)) ^ 2)
+# test_MSE_scaled
+
+test_MSE_actual <- mean((exp(college_train$log_Apps) - exp(predict.lm(fit, college_test))) ^ 2)
+test_MSE_actual
+```
+
+(b) Fit a ridge regression model on the training set, with λ chosen by crossvalidation. Report the test error obtained.
+Ridge regression model was fit with lambda chosen by cross-validation
+<br>
+- test_error_ridge_actual = 2848079
+
+
+```{r, message = FALSE}
+x_train <- as.matrix(college_train[, !(colnames(college_train) == "log_Apps")])
+y_train <- college_train[, colnames(college_train) == "log_Apps"]
+
+x_test <- as.matrix(college_test[, !(colnames(college_test) == "log_Apps")])
+y_test <- college_test[, colnames(college_test) == "log_Apps"]
+
+ridge.mod <- glmnet(x_train, y_train, alpha = 0)
+
+# Model Selection using cross validation
+cv.out <- cv.glmnet(x_train, y_train, alpha = 0)
+plot(cv.out)
+
+# names(cv.out)
+
+bestlam <- cv.out$lambda.min
+bestlam
+
+ridge.pred <- predict(ridge.mod, s = bestlam, type = "coefficients")
+
+ridge.pred2 <- predict(ridge.mod, s = bestlam, newx = x_test, type = "response")
+```
+```{r}
+test_error_ridge_scaled <- mean((ridge.pred2 - y_test)^2)
+# test_error_ridge_scaled
+
+test_error_ridge_actual <- mean((exp(ridge.pred2) - exp(y_test))^2)
+test_error_ridge_actual
+```
+
+(c) Fit a lasso model on the training set, with λ chosen by crossvalidation. Report the test error obtained, along with the number of non-zero coefficient estimates.
+<br>
+- test_error_lasso_actual = 1634592
+<br>
+- Non-zero coefficient estimates correspond to these columns in the unmodified data - Private, Accept, Enroll, Top10perc, F.Undergrad, Outstate, Room.Board, Books, Terminal, S.F.Ratio, perc.alumni, Expend, Grad.Rate
+
+```{r, message = FALSE}
+lasso.mod <- glmnet(x_train, y_train, alpha = 1)
+plot(lasso.mod)
+```
+
+```{r}
+cv.out <- cv.glmnet(x_train, y_train, alpha = 1)
+plot(cv.out)
+
+bestlam <- cv.out$lambda.min
+
+lasso.pred <- predict(lasso.mod, s = bestlam, type = "coefficients")
+lasso.pred
+
+lasso.pred2 <- predict(lasso.mod, s = bestlam, newx = x_test, type = "response")
+
+test_error_lasso_scaled <- mean((lasso.pred2 - y_test)^2)
+# test_error_lasso_scaled
+
+test_error_lasso_actual <- mean((exp(lasso.pred2) - exp(y_test))^2)
+test_error_lasso_actual
+```
+(d) Among those that are not predicted well, do you notice any common trend shared between the colleges?
+<br>
+I'm considering the lasso model for this exercise since it had the least MSE among all the models.
+<br>
+Considering 25% deviation from the actual 'Apps' value as a cutoff, the following trend is observed:
+ - Predominantly private (mean 0.81 vs 0.73) <br>
+ - Expensive (mean 14801 vs 9300) <br>
+ - Mostly terminal (median 95 vs 81, third quadrant 98 vs 90) <br>
+ - Lesser enrollment,Top10perc and Top25perc when compared to the well predicted college applications <br>
+ - Higher grad rate
+```{r}
+
+# Adding columns for predicted y values and %-deviation from the actual value (unscaled) in the test set
+college_test$pred_log_Apps <- c(lasso.pred2)
+college_test$deviation_percent <- c(abs(exp(lasso.pred2) - exp(college_test$log_Apps)) * 100 / exp(college_test$log_Apps))
+
+college_test_sorted <- college_test[order(-college_test$deviation_percent),]
+
+head(college_test_sorted)
+summary(college_test_sorted$deviation_percent)
+
+# The percent deviation varies from about 0.12% to 74% on the test set. Taking 25% as acceptable deviation (corresponding to squared error = 0.06), the values that are not predicted well are:
+not_predicted_well <- college_test_sorted[college_test_sorted$deviation_percent > 25, ]
+
+# and those predicted well are: 
+predicted_well <- college_test_sorted[college_test_sorted$deviation_percent <= 25, ]
+
+# Let's compare them
+summary(not_predicted_well)
+summary(predicted_well)
+
+sapply(predicted_well, sd)
+sapply(not_predicted_well, sd)
+
+```
+

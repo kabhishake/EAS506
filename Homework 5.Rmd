@@ -1,0 +1,508 @@
+---
+title: "Homework 5"
+author: "Abhishek Kumar"
+date: "11/22/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+```{r, results = "hide", message = FALSE}
+rm(list = ls())
+# graphics.off()
+
+# install.packages('ggfortify')
+# install.packages('e1071')
+# install.packages('ROCR')
+# install.packages('neuralnet')
+# install.packages("plotly")
+# install.packages('randomForest')
+
+library(ISLR2)
+library(leaps)
+library(rpart)
+library(caret)
+library(klaR)
+library(class)
+library(GGally)
+library(ggfortify)
+library(e1071)
+library(MASS)
+library(ROCR)
+library(neuralnet)
+library(nnet)
+library(plotly)
+library(randomForest)
+```
+1) A pen-based handwritten digit recognition (pendigits) was obtained from 44
+writers, each of whom handwrote 250 examples of the digits 0,10,2,....,9 in a
+random order. The raw data consists of handwritten digits extracted from tablet
+coordinates of the pen at fixed time intervals. The last column in the dataset are the class labels (digits). The data can be found here: (https://archive.ics.uci.edu/ml/datasets/Pen-Based+Recognition+of+Handwritten+Digits).
+
+```{r, results = "hide"}
+set.seed(8)
+
+data1.train <- read.csv(url("https://archive.ics.uci.edu/ml/machine-learning-databases/pendigits/pendigits.tra"), header = FALSE)
+
+data1.test <- read.csv(url("https://archive.ics.uci.edu/ml/machine-learning-databases/pendigits/pendigits.tes"), header = FALSE)
+
+head(data1.train)
+head(data1.test)
+
+dim(data1.train)
+dim(data1.test)
+
+X1.train <- data1.train[, -17]
+Y1.train <- data1.train[, 17]
+X1.test <- data1.test[, -17]
+Y1.test <- data1.test[, 17]
+```
+
+a) Compute the variance of each of the variables and show that they are very similar. How many PCs explain 80% and 90% of the total variation of the data? Display biplots for the first few PCs, color the plots by class (digit). Create a three-dimensional score plot for PC1, PC2 and PC3, color the samples by class.
+- From the summary, we can see that cumulative variance above 80% is explained by 6 components and above 90% is explained by 8 components.
+```{r}
+# Computing the variance of each variable
+X1_var <- sapply(X1.train, var) 
+X1_var
+# Variances don't actually look similar
+
+scaled.X1.train <- scale(X1.train)
+scaled.X1.test <- scale(X1.test)
+
+pr1.out <- prcomp(x = scaled.X1.train, center = FALSE, scale = FALSE)
+summary(pr1.out)
+
+# 6 PCs explain 80% of the total variance of data (actually 5 is barely less but let us consider 6). 8 PCs explain 90%
+
+# plotting the biplot
+biplot(pr1.out)
+
+# Adding some colors to the biplot by using autoplot
+autoplot(pr1.out, data = data1.train, 
+         colour = as.factor(data1.train$V17), 
+         loadings = TRUE, loadings.label = TRUE, loadings.label.size = 5,
+         scale = 0)
+```
+\newpage
+
+```{r}
+# Visualising a 3D-plot with top 3 PCs as axes
+
+#############
+#
+#
+#
+#
+#
+#
+# Just some placeholders to print my 3D plot in a new page 
+#
+#
+#
+#
+#
+#
+##############
+
+plot_ly(x = pr1.out$x[, 1], y = pr1.out$x[, 2], z = pr1.out$x[, 3], type = "scatter3d", mode = "markers", color = as.factor(Y1.train))
+
+```
+b) Divide the data into test and training. Fit a kNN model over a range of “k” to the (a) raw data, and (b) PCs from part (A) that capture at least 80% of the variation. Comment on your results.
+<br>
+- Best values of k was found to be 3 for both the raw data and the PCs capturing 80% of the variation.
+- Test accuracy on raw data was found to be 97.8%
+- Test accuracy on 6 PCs was found to be 93.1%
+
+```{r}
+
+# Data was already divided into training and test so I'm skipping that
+
+# Fitting KNN on raw data and checking results for multiple values of k
+
+k_values <- c(1,3,5,7,9,11,13,15,17,19,21,23,25)
+knn_error_store_raw <- matrix(rep(NA, length(k_values)))
+
+i = 0
+for (k in k_values){
+
+    knn.pred_test <- knn(X1.train, X1.test, as.factor(Y1.train), k)
+    conf <- confusionMatrix(as.factor(knn.pred_test), as.factor(Y1.test))
+    
+    i = i + 1
+    knn_error_store_raw[i] <- 1- conf$overall['Accuracy']
+}
+
+best_accuracy_raw = 1 - min(knn_error_store_raw)
+best_accuracy_raw
+
+# plot(knn_error_store_raw, type = 'b', xlab = "k", ylab = "Error", xaxt = "n")
+# axis(1, at = seq(1,length(k_values)), labels = k_values)
+
+
+# Fitting KNN on Principal Components
+# names(pr1.out)
+# pr1.out$x
+
+# Calculating PCs on train and test data
+pred.X1.train <- predict(pr1.out, newdata = scaled.X1.train)
+pred.X1.test <- predict(pr1.out, newdata = scaled.X1.test)
+
+# We only need to consider the first 6 PCs
+X1.train.PC <- pred.X1.train[, 1:6]
+X1.test.PC <- pred.X1.test[, 1:6]
+
+knn_error_store_PC <- matrix(rep(NA, length(k_values)))
+
+i = 0
+for (k in k_values){
+
+    knn.pred_test <- knn(X1.train.PC, X1.test.PC, as.factor(Y1.train), k)
+    conf <- confusionMatrix(as.factor(knn.pred_test), as.factor(Y1.test))
+    
+    i = i + 1
+    knn_error_store_PC[i] <- 1- conf$overall['Accuracy']
+    
+}
+
+best_accuracy_PC = 1 - min(knn_error_store_PC)
+best_accuracy_PC 
+
+par(mfrow = c(1, 2))
+plot(knn_error_store_raw, type = 'b', col = 'blue', xlab = "k", ylab = "Test Error", xaxt = "n", main = "Raw Data")
+axis(1, at = seq(1,length(k_values)), labels = k_values)
+plot(knn_error_store_PC, type = 'b', col = 'red', xlab = "k", ylab = "Test Error", xaxt = "n", main = "Principal Components")
+axis(1, at = seq(1,length(k_values)), labels = k_values)
+```
+
+c) Fit another classifier of your choosing. How do the results compare to part (B)?
+- I chose LDA as another classifier
+- LDA gave a test accuracy of 83% for the raw data and 72.7% on the top 6 PCs
+
+```{r}
+
+# I'm using LDA as another classifier and compare results
+
+# Fitting LDA on Raw Data
+lda.fit.raw <- lda(x = X1.train, grouping = Y1.train)
+# lda.fit.raw
+
+# Predicting on Raw Values
+# Training Data
+lda.pred.raw.train <- predict(lda.fit.raw, newdata = X1.train)
+
+y_hat_train_lda_raw<- lda.pred.raw.train$class
+
+lda.conf.train <- confusionMatrix(as.factor(y_hat_train_lda_raw), as.factor(Y1.train))
+# lda.conf.train$overall['Accuracy']
+
+# Test Data
+lda.pred.raw.test <- predict(lda.fit.raw, newdata = X1.test)
+
+y_hat_test_lda_raw<- lda.pred.raw.test$class
+
+lda.conf.test <- confusionMatrix(as.factor(y_hat_test_lda_raw), as.factor(Y1.test))
+lda.conf.test$overall['Accuracy']
+
+
+# Fitting LDA on Principal Components
+lda.fit.PC<- lda(x = X1.train.PC, grouping = Y1.train)
+# lda.fit.PC
+
+# Making Predictions
+# Training Data
+lda.pred.PC.train <- predict(lda.fit.PC, newdata = X1.train.PC)
+
+y_hat_train_lda_PC<- lda.pred.PC.train$class
+
+lda.conf.train.PC <- confusionMatrix(as.factor(y_hat_train_lda_PC), as.factor(Y1.train))
+# lda.conf.train.PC$overall['Accuracy']
+
+# Test Data
+lda.pred.PC.test <- predict(lda.fit.PC, newdata = X1.test.PC)
+
+y_hat_test_lda_PC<- lda.pred.PC.test$class
+
+lda.conf.test.PC <- confusionMatrix(as.factor(y_hat_test_lda_PC), as.factor(Y1.test))
+lda.conf.test.PC$overall['Accuracy']
+```
+2) The Cleveland heart-disease study was conducted by the Cleveland Clinic
+Foundation. The response variable is “diag1” (diagnosis of heart disease: buff = healthy, sick = heart disease). There is a second “diag2” that contains stage information about the sick, this can be disregarded. There were 303 patients in the study, and 13 predictive variables, including age, gender, and a range of biological measurements.
+Fit a neural network, CART model and a random forest to the Cleveland heart disease data. Compare the results, and comment on the performance.
+- NN with only 1 hidden layer and 1 node gave an accuracy of 75% on the test data
+- NN with 1 hidden layer and 1 node gave an accuracy of about 77% on the test data
+- NN with 2 hidden layers and 2 nodes in each layer had a much poorer accuracy of 74%. This is lesser accuracy than the simpler NNs. This model must be overfitting the data.
+- Both CART and Random Forest gave an accuracy of barely 53.5%. The models must be highly overfitting the training data. 
+
+
+```{r}
+
+set.seed(8)
+
+load('~/Desktop/UB Courses/Sem 1/Statistical Data Mining/Codes/cleveland.RData')
+# head(cleveland)
+
+my_cleveland <- cleveland[, -15]
+head(my_cleveland)
+dim(my_cleveland)
+
+# Checking whether the data is balanced
+summary(my_cleveland$diag1) # more or less balanced
+
+# Transforming the response variable
+diag1 <- ifelse(my_cleveland$diag1 == 'buff', 1, 0)
+
+# 1-hot encoding categorical predictors 
+dmy <- dummyVars(" ~ . -diag1", data = my_cleveland, fullRank = TRUE)
+my_cleveland <- data.frame(predict(dmy, newdata = my_cleveland), diag1)
+
+head(my_cleveland)
+
+# choosing 2/3rd of the data as training and rest as test data
+train_cleve_indis = sample(c(1:length(my_cleveland[, 1])), round(2/3 * length(my_cleveland[, 1])), replace = FALSE)
+train_cleve = my_cleveland[train_cleve_indis, ]
+test_cleve = my_cleveland[-train_cleve_indis, ]
+```
+```{r}
+
+## Neural Network
+# which(is.na(train_cleve) == TRUE)
+# table(train_cleve$diag1)
+
+# Neural network with only 1 hidden layer
+nn0 <- neuralnet(diag1 ~ ., data = train_cleve, hidden = 1,
+                 err.fct = "ce", linear.output = FALSE)
+plot(nn0, rep = "best")
+
+pred0 <- predict(nn0, newdata = test_cleve)
+y_pred0 <- round(pred0)
+conf_nn0_test <- confusionMatrix(as.factor(y_pred0), as.factor(test_cleve$diag1))
+conf_nn0_test$overall['Accuracy']
+```
+```{r}
+# Neural network with 2 hidden layers
+nn1 <- neuralnet(diag1 ~ ., data = train_cleve, hidden = 2,
+                 stepmax = 10^9, err.fct = "ce", linear.output = FALSE)
+plot(nn1, rep = "best")
+
+pred1 <- predict(nn1, newdata = test_cleve)
+pred1 <- round(pred1)
+conf_nn1_test <- confusionMatrix(as.factor(pred1), as.factor(test_cleve$diag1))
+conf_nn1_test$overall['Accuracy']
+```
+```{r}
+# Neural network with 2 layers and 2 nodes in each layer
+nn2 <- neuralnet(diag1 ~ ., data = train_cleve, hidden = c(2,2),
+                stepmax = 10^9, err.fct = "ce", linear.output = FALSE)
+plot(nn2, rep ="best")
+
+pred2 <- predict(nn2, newdata = test_cleve)
+pred2 <- round(pred2)
+conf_nn2_test <- confusionMatrix(as.factor(pred2), as.factor(test_cleve$diag1))
+conf_nn2_test$overall['Accuracy']
+```
+```{r}
+# CART model
+
+# Transforming response variables into factors
+train_cleve$diag1 <- as.factor(train_cleve$diag1)
+test_cleve$diag1 <- as.factor(test_cleve$diag1)
+
+model.control.cart <- rpart.control(minsplit = 5, xval = 10, cp = 0)
+cart.fit.cleve <- rpart(diag1 ~ ., data = train_cleve, method = "class", control = model.control.cart)
+
+plot(cart.fit.cleve$cptable[, 4], main = "Cp for Model Selection", type = "b")
+min_cp = which.min(cart.fit.cleve$cptable[, 4])
+
+pruned.cart.cleve <- prune(cart.fit.cleve, cp = min_cp)
+
+pred.cart.test <- predict(pruned.cart.cleve, newdata = test_cleve, type = "class")
+
+conf_cleve_test <- confusionMatrix(pred.cart.test, test_cleve$diag1)
+conf_cleve_test$overall['Accuracy']
+```
+```{r}
+
+# Random Forest
+rf.cleve<- randomForest(diag1 ~ ., data = train_cleve, n.tree = 10000)
+
+varImpPlot(rf.cleve)
+
+importance(rf.cleve)
+
+pred_rf_test <- predict(rf.cleve, newdata = test_cleve, type = "response")
+conf_rf_test <- confusionMatrix(pred_rf_test, test_cleve$diag1)
+conf_cleve_test$overall['Accuracy']
+```
+
+3) This problem involves the OJ data set which is part of the ISLR2 package.
+```{r}
+
+set.seed(8)
+
+?OJ
+my_OJ <- as.data.frame(OJ)
+head(my_OJ)
+dim(my_OJ)
+
+```
+
+(a) Create a training set containing a random sample of 800 observations, and a
+test set containing the remaining observations.
+```{r}
+
+train_OJ_indis <- sample(c(1:length(my_OJ[, 1])), size = 800, replace = FALSE)
+train_OJ <- my_OJ[train_OJ_indis, ]
+test_OJ <- my_OJ[-train_OJ_indis, ]
+
+dim(train_OJ)
+dim(test_OJ)
+
+```
+
+(b) Fit a support vector classifier to the training data using cost = 0.01, with
+Purchase as the response and the other variables as predictors. Use the
+summary() function to produce summary statistics, and describe the results
+obtained.
+- SVM was fit using linear kernel and cost = 0.01. The model has 623 support vectors.
+
+```{r}
+
+head(train_OJ)
+summary(train_OJ$Purchase)
+
+train_OJ$Purchase <- as.factor(train_OJ$Purchase)
+# train_OJ$Purchase
+
+svm.fit <- svm(Purchase ~ ., data = train_OJ, kernel = "linear", cost = 0.01, scale = FALSE)
+
+# svm.fit$index
+summary(svm.fit)
+```
+
+(c) What are the training and test error rates?
+- Training error = 23.9%
+- Test error = 25.2%
+```{r}
+
+y.hat.train <- predict(svm.fit, newdata = train_OJ)
+y.true.train <- train_OJ$Purchase
+
+conf_svm_train <- confusionMatrix(y.hat.train, y.true.train)
+train_error_svm <- 1 - conf_svm_train$overall['Accuracy']
+train_error_svm
+
+y.hat.test <- predict(svm.fit, newdata = test_OJ)
+y.true.test <- as.factor(test_OJ$Purchase)
+
+conf_svm_test <- confusionMatrix(y.hat.test, y.true.test)
+test_error_svm <- 1 - conf_svm_test$overall['Accuracy']
+test_error_svm
+```
+
+(d) Use the tune() function to select an optimal cost. Consider values in the range 0.01 to 10.
+```{r}
+
+tune.model <- tune(svm, Purchase ~ ., data = train_OJ, kernel = "linear", 
+                   ranges = list(0.01, 0.05, 0.1, 0.5, 1, 1.5, 5, 10) )
+
+# names(tune.model)
+bestmod <- tune.model$best.model
+bestmod
+
+```
+
+(e) Compute the training and test error rates using this new value for cost.
+- Training error = 16.4%
+- Test error = 25.2%
+```{r}
+
+y.hat.train <- predict(bestmod, newdata = train_OJ)
+y.true.train <- train_OJ$Purchase
+
+conf_best_train <- confusionMatrix(y.hat.train, y.true.train)
+train_error_svm_best <- 1 - conf_best_train$overall['Accuracy']
+train_error_svm_best
+
+y.hat.test <- predict(svm.fit, newdata = test_OJ)
+y.true.test <- as.factor(test_OJ$Purchase)
+
+conf_best_test <- confusionMatrix(y.hat.test, y.true.test)
+test_error_svm_best <- 1 - conf_best_test$overall['Accuracy']
+test_error_svm_best
+```
+
+(f) Repeat parts (b) through (e) using a support vector machine with a radial
+kernel. Use the default value for gamma.
+- Training error for best model = 15%
+- Test error for best model = 17%
+```{r}
+
+## Fitting SVM model with radial kernel with cost = 0.1
+svm.fit.rad <- svm(Purchase ~ ., data = train_OJ, kernel = "radial", cost = 0.01, scale = FALSE)
+
+# svm.fit.rad$index
+# summary(svm.fit.rad)
+
+# Using tune function to select optimal cost
+tune.model.rad <- tune(svm, Purchase ~ ., data = train_OJ, kernel = "radial", 
+                   ranges = list(0.01, 0.05, 0.1, 0.5, 1, 1.5, 5, 10) )
+
+# summary(tune.model.rad)
+bestmod.rad <- tune.model.rad$best.model
+# bestmod.rad
+
+#Computing training and test error rates
+y.hat.train <- predict(bestmod.rad, newdata = train_OJ)
+y.true.train <- train_OJ$Purchase
+
+conf_rad_train <- confusionMatrix(y.hat.train, y.true.train)
+train_error_rad_best <- 1 - conf_rad_train$overall['Accuracy']
+train_error_rad_best
+
+y.hat.test <- predict(bestmod.rad, newdata = test_OJ)
+y.true.test <- as.factor(test_OJ$Purchase)
+
+conf_rad_test <- confusionMatrix(y.hat.test, y.true.test)
+test_error_rad_best <- 1 - conf_rad_test$overall['Accuracy']
+test_error_rad_best
+```
+
+(g) Repeat parts (b) through (e) using a support vector machine with a
+polynomial kernel. Set degree = 2.
+- Training error for best model = 17.8%
+- Test error for best model = 19.2%
+```{r}
+
+## Fitting SVM model with polynomial kernel with cost = 0.1
+svm.fit.poly <- svm(Purchase ~ ., data = train_OJ, kernel = "polynomial", cost = 0.01, 
+                   degree = 2, scale = FALSE)
+
+# svm.fit.poly$index
+# summary(svm.fit.poly)
+
+tune.model.poly <- tune(svm, Purchase ~ ., data = train_OJ, kernel = "polynomial",
+                        degree = 2, ranges = list(0.01, 0.05, 0.1, 0.5, 1, 1.5, 5, 10) )
+
+# summary(tune.model.poly)
+bestmod.poly <- tune.model.poly$best.model
+# bestmod.poly
+
+y.hat.train <- predict(bestmod.poly, newdata = train_OJ)
+y.true.train <- train_OJ$Purchase
+
+conf_poly_train <- confusionMatrix(y.hat.train, y.true.train)
+train_error_poly_best <- 1 - conf_poly_train$overall['Accuracy']
+train_error_poly_best
+
+y.hat.test <- predict(bestmod.poly, newdata = test_OJ)
+y.true.test <- as.factor(test_OJ$Purchase)
+
+conf_poly_test <- confusionMatrix(y.hat.test, y.true.test)
+test_error_poly_best <- 1 - conf_poly_test$overall['Accuracy']
+test_error_poly_best
+```
+
+(h) Overall, which approach seems to give the best results on this data?
+- SVM with a radial kernel is giving the best results on this data
